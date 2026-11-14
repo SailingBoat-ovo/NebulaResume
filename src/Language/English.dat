@@ -1,0 +1,31 @@
+# NebulaResume localization -- English
+
+# ── Spectator role ──
+"role.obsSpectator.name" : "Spectator"
+"role.obsSpectator.short" : "Spec"
+"role.obsSpectator.generalBlurb" : "Watches the round, never affects the outcome"
+"role.obsSpectator.doc" : "You joined mid-round as a spectator. You are not counted among any team's survivors and can never win. You may move freely and see everything."
+"teams.obsSpectator" : "Spectator"
+
+# ── Options ──
+"options.resume.revive" : "Stay alive after reconnect"
+"options.resume.revive.detail" : "When off, an alive player returns as a ghost."
+"options.resume.limit" : "Max reconnects per round"
+"options.resume.limit.detail" : "Beyond this, the reconnect is refused until the round ends."
+"options.resume.spectator" : "Allow spectators mid-round"
+"options.resume.spectator.detail" : "When on, new players may join an ongoing round as spectators."
+"options.resume.spectator.limit" : "Spectator limit"
+"options.resume.spectator.limit.detail" : "Spectators share the same 32 player slots."
+
+# ── Disconnect prompts ──
+# NOTE: values must not contain \n -- the addon language reader splits each line
+# on the first quote-pair and does no escape decoding, so \n shows up verbatim.
+"prompt.disconnected" : "The connection to the server was lost. (Reconnect only works with the latest Fmpostor server plus the latest version of this addon; ignore this notice on other servers.)"
+"prompt.resumed" : "Back in the round"
+"prompt.meetingRefused" : "A meeting is in progress, so this reconnect was cancelled. Please rejoin with the room code after the meeting ends. Your slot is still reserved and this attempt does not count against the reconnect limit."
+"prompt.reconnectFailed" : "Reconnect failed -- a meeting may be in progress, or another network problem occurred. Your slot is still reserved, please try again later. Failed reconnects do not count against the reconnect limit."
+"prompt.limitReached" : "Reconnect limit reached for this round. Please wait until it ends."
+"prompt.slotLost" : "The server could not find your reserved slot (a reconnect attempt during a meeting may have used it up), so your role cannot be restored this round."
+
+# ── End-game state ──
+"state.reconnected" : "Reconnected"

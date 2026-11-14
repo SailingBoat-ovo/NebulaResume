@@ -1,0 +1,10 @@
+{
+ "Id": "NebulaResume",
+ "Name": "<color=#00BFFF><b>Fmpostor 断线重连</b></color>",
+ "Author": "<color=#FFD700><b>SailingBoat-ovo</b></color>",
+ "Description": "<color=#7FFF7F><b>掉线重进即可回到原对局</b></color><br><color=#DDDDDD>职业 / 位置 / 任务 / 生死全部恢复, 新玩家可中途观战</color>",
+ "Version": "v1.0",
+ "Build": 4,
+ "Dependency": [],
+ "Hidden": false
+}

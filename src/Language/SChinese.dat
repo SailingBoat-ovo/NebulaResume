@@ -1,0 +1,31 @@
+# NebulaResume 本地化 —— 简体中文
+
+# ── 观战职业 ──
+"role.obsSpectator.name" : "观战中"
+"role.obsSpectator.short" : "观"
+"role.obsSpectator.generalBlurb" : "旁观这一局, 不参与胜负"
+"role.obsSpectator.doc" : "你在本局中途加入, 以观战身份旁观。你不计入任何一方的存活人数, 也不会获得胜利。可以自由移动, 看到全场信息。"
+"teams.obsSpectator" : "观战中"
+
+# ── 设置项 ──
+"options.resume.revive" : "未死亡重连后保持活人"
+"options.resume.revive.detail" : "关闭后, 未死亡掉线重连会按灵魂处理。"
+"options.resume.limit" : "每局最多重连次数"
+"options.resume.limit.detail" : "超出后本次重连会被拒绝, 需要等本局结束。"
+"options.resume.spectator" : "允许对局中观战加入"
+"options.resume.spectator.detail" : "开启后, 全新玩家可以在对局进行中以观战身份加入。"
+"options.resume.spectator.limit" : "观战人数上限"
+"options.resume.spectator.limit.detail" : "观战者与玩家共用 32 个玩家位。"
+
+# ── 掉线提示 ──
+# ⚠️ 这里的值【不能写 \n】: 语言文件的解析是逐行读 "键" : "值" 再剥引号,
+#    不做任何转义还原 —— 写 \n 就会在游戏里原样显示成两个字符。
+"prompt.disconnected" : "与服务器的连接意外中断。（注意: 断线重连仅在最新版 Fmpostor 服务端搭配最新版本插件时生效, 其他服务器请忽略本提示。）"
+"prompt.resumed" : "已回到对局"
+"prompt.meetingRefused" : "会议进行中, 本次重连已取消。请等会议结束后重新输入房间号进入。您的槽位依然保留, 本次不计入重连次数。"
+"prompt.reconnectFailed" : "重连失败，可能是会议正在进行或者其他网络原因。您的槽位依然保留，请稍后重试。重连失败不计入玩家重连上限！"
+"prompt.limitReached" : "本局重连次数已用完, 请等待本局结束后再加入"
+"prompt.slotLost" : "服务器没有找到你的保留位置（可能是会议期间的重连已用掉了它），本局无法恢复原职业。"
+
+# ── 结算状态 ──
+"state.reconnected" : "已重连"

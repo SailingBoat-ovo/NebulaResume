@@ -17,7 +17,7 @@
 
 掉线以后，用同一个房间号重新进入，就能回到原来的对局：**职业 / 幽灵职业 / 附加职业 / 位置 / 任务列表 / 生死** 全部恢复。全新玩家还可以在对局中途以中立观战者身份加入。
 
-> ⚠️ **这是配套项目的一半。** 本插件只负责客户端；保槽、识别重连、会议闸门都在服务端 **[Fmpostor](https://github.com/SailingBoat-ovo/Fmpostor)**（Turbo-700.0 及以上）。只装插件、或者只换服务端，都不会生效。
+> ⚠️ **这是配套项目的一半。** 本插件只负责客户端；保槽、识别重连、会议闸门都在服务端 **[Fmpostor](https://github.com/SailingBoat-ovo/Fmpostor)**（Max-800.0 及以上）。只装插件、或者只换服务端，都不会生效。
 
 ### 一、使用方式
 
@@ -25,8 +25,8 @@
 
 | 项目 | 要求 |
 |---|---|
-| 模组 | Nebula on the Ship（星云）v3.4.2.1 |
-| 服务端 | Fmpostor **Turbo-700.0** 或更新版本，`config.json` 里开启 `Reconnect.Enabled` |
+| 模组 | Nebula on the Ship（星云）v3.6.1 / v3.6.2 |
+| 服务端 | Fmpostor **Max-800.0** 或更新版本（会议中重连需要；Turbo-700.0 也能用，但会议中不放行），`config.json` 里开启 `Reconnect.Enabled` |
 | 房间 | **所有玩家**都装了本插件（尤其是房主——身体由房主生成） |
 
 #### 2. 安装
@@ -144,10 +144,11 @@ NOS 的职业、附加职业等状态是**每台客户端各存一份**的，服
 | 6 | 服务端 → 全体 | `[6, N, clientId…]` | 死亡名册（全量） |
 | 7 | 服务端 → 客户端 | `[7, 0/1]` | 观战判定 |
 | 8 | 服务端 → 全体 | `[8, N, clientId…]` | 观战名单（全量） |
-| 9 | 房主 → 服务端 | `[9, 版本, 能力标志, 观战上限]` | 房间能力声明（bit0 重连、bit1 观战） |
+| 9 | 房主 → 服务端 | `[9, 版本, 能力标志, 观战上限]` | 房间能力声明（bit0 重连、bit1 观战、bit3 会议中进入） |
 | 10 | 房主 → 全体 | `[10, 会议中, 会议计时ms, 紧急冷却ms]` | 会议状态；服务端据此开关会议闸门，中途加入者据此对齐紧急按钮计时 |
 | 11 | 重连者 → 房主 | `[11, 请求者playerId]` | 请求全场职业 |
 | 12 | 房主 → 重连者 | `[12, 目标playerId, 对象playerId, …状态]` | 逐人回复职业 |
+| 13 | 服务端 → 重连者 | `[13, 旧playerId]` | 会议中进入：这场会议坐旧身份的座位投票，散会后再续局 |
 
 状态快照（v3）：
 
@@ -198,11 +199,27 @@ src/
     RoomCapability.cs     房间能力声明（kind=9）
     ReconnectPrompt.cs    断线 / 拒绝时的提示
     ReconnectStateTag.cs  结算状态"已重连"
-    FrameGuard.cs         重连窗口内的帧级异常保护
+    FrameGuard.cs         重连窗口内的帧级异常保护；跳过 NOS 玩家表里查不到的身体
+    MeetingSeat.cs / MeetingProxy.cs / MeetingDefer.cs   会议中进入：坐旧座位投票、投票格全场一致、角色到齐后再搭会议界面
+    RejoinNotice.cs       散会后的位置与重连提示
+    EndSummary.cs         结算总结：同一人只显示一行、去掉占位职业、标注「重连玩家」
     ResumeOptions.cs      设置项
     ……
 NebulaResume.zip          成品包，直接放进 Addons
 ```
+
+### 更新记录
+
+**v2.0**（配合 Fmpostor Max-800.0）
+
+- 会议中重连：会议进行中回来的人以原身份的座位投票，散会后续局。
+- 新玩家中途以观战者加入的流程修复（进入时不再卡住）。
+- 重连后游戏能正常结算：结算前清理没回来的旧身份和已被接替的旧身份；房主端检查卡住的胜负判定。
+- 结算总结：同一人只显示一行，去掉占位的船员职业，重连过的玩家标注「重连玩家」。
+- 修复重连后「紧急会议」附加技能重复。
+- 修复中途生成的身体每帧触发 NOS 空引用。
+
+**v1.0**：首个公开版本。
 
 ### 已知限制
 
@@ -224,7 +241,7 @@ GNU General Public License v3.0 —— 见 [LICENSE](LICENSE)。
 
 Drop out, rejoin with the same room code, and you are back in the round you left, with your **role / ghost role / modifiers / position / task list / alive-or-dead state** all restored. Brand-new players can also join a running round as neutral spectators.
 
-> ⚠️ **This is one half of a pair.** This add-on is the client side only. Slot reservation, reconnect detection and the meeting gate live in the server **[Fmpostor](https://github.com/SailingBoat-ovo/Fmpostor)** (Turbo-700.0 or newer). Installing only the add-on, or only the server, does nothing.
+> ⚠️ **This is one half of a pair.** This add-on is the client side only. Slot reservation, reconnect detection and the meeting gate live in the server **[Fmpostor](https://github.com/SailingBoat-ovo/Fmpostor)** (Max-800.0 or newer). Installing only the add-on, or only the server, does nothing.
 
 ### 1. Usage
 
@@ -232,8 +249,8 @@ Drop out, rejoin with the same room code, and you are back in the round you left
 
 | Item | Requirement |
 |---|---|
-| Mod | Nebula on the Ship v3.4.2.1 |
-| Server | Fmpostor **Turbo-700.0** or newer, with `Reconnect.Enabled` turned on in `config.json` |
+| Mod | Nebula on the Ship v3.6.1 / v3.6.2 |
+| Server | Fmpostor **Max-800.0** or newer (needed for rejoining during meetings; Turbo-700.0 still works, but keeps joins closed during meetings), with `Reconnect.Enabled` turned on in `config.json` |
 | Room | **Every player** has the add-on installed, especially the host, since the host spawns the body |
 
 #### Install
@@ -352,10 +369,11 @@ The first int of a frame is its kind:
 | 6 | server → all | `[6, N, clientId…]` | Dead roster (full) |
 | 7 | server → client | `[7, 0/1]` | Spectator verdict |
 | 8 | server → all | `[8, N, clientId…]` | Spectator list (full) |
-| 9 | host → server | `[9, version, flags, spectatorLimit]` | Room capability declaration (bit0 reconnect, bit1 spectator) |
+| 9 | host → server | `[9, version, flags, spectatorLimit]` | Room capability declaration (bit0 reconnect, bit1 spectator, bit3 join during meetings) |
 | 10 | host → all | `[10, inMeeting, meetingTimerMs, emergencyCooldownMs]` | Meeting state: opens/closes the server's meeting gate; mid-joiners align the emergency button timer with it |
 | 11 | reconnecter → host | `[11, requesterPlayerId]` | Request everyone's roles |
 | 12 | host → reconnecter | `[12, targetPlayerId, subjectPlayerId, …state]` | Role reply, one player per frame |
+| 13 | server → reconnecter | `[13, oldPlayerId]` | Joined during a meeting: vote from the old identity's seat, resume after the meeting |
 
 State snapshot (v3):
 
@@ -406,11 +424,27 @@ src/
     RoomCapability.cs     room capability declaration (kind=9)
     ReconnectPrompt.cs    disconnect / refusal prompts
     ReconnectStateTag.cs  "Reconnected" on the results screen
-    FrameGuard.cs         frame-level exception guard during the reconnect window
+    FrameGuard.cs         frame-level exception guard during the reconnect window; skips bodies NOS has no player for
+    MeetingSeat.cs / MeetingProxy.cs / MeetingDefer.cs   joining during a meeting: vote from the old seat, consistent vote areas, build the meeting UI once roles have arrived
+    RejoinNotice.cs       post-meeting position and rejoin notices
+    EndSummary.cs         results summary: one row per player, no placeholder role, "reconnected" tag
     ResumeOptions.cs      settings
     …
 NebulaResume.zip          ready-made package for Addons
 ```
+
+### Changelog
+
+**v2.0** (pairs with Fmpostor Max-800.0)
+
+- Rejoin during meetings: a player who comes back mid-meeting votes from their original seat, and the round resumes after the meeting.
+- Fixed new players getting stuck while joining a running round as spectators.
+- Games end normally after reconnects: identities that never came back, or were replaced, are cleaned up before the game ends, and the host checks for a stuck win check.
+- Results summary: one row per player, no placeholder crewmate role, and a "reconnected" tag.
+- Fixed a duplicate "Emergency meeting" modifier after reconnecting.
+- Fixed a NOS null reference on every frame for bodies spawned mid-round.
+
+**v1.0**: first public release.
 
 ### Known limitations
 

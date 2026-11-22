@@ -298,6 +298,10 @@ internal static class NebulaStateWire
             {
                 ResumeAttemptSeen = true;
                 ReconnectPrompt.NoteAttempt("续局信号 kind=3");
+
+                // 第 3 个值(新服务端才有): 掉线之后是否开过会 → 决定散会后的落位。
+                RejoinPlacement.MeetingSinceDisconnect = frame.Length >= 3 && frame[2] != 0;
+                NebulaResumeEntry.Log("续局信号: 掉线后" + (RejoinPlacement.MeetingSinceDisconnect ? "开过会 → 不回掉线处, 用散会默认位置。" : "没开过会 → 恢复掉线位置。"));
                 FrameGuard.Arm();   // 本局进入重连保护期(帧级异常保护生效)
 
                 // ★ 收到新的续局信号 = 一次新的重连尝试 → 复位上一次的过渡状态。
@@ -391,6 +395,34 @@ internal static class NebulaStateWire
             if (kind == RoleSync.KindSync)
             {
                 RoleSync.OnSync(frame);
+                return;
+            }
+
+            // ── kind=13 会议中进入: 本场会议坐旧身份的座位(服务端 → 本机) ──
+            if (kind == MeetingSeat.KindMeetingSeat)
+            {
+                MeetingSeat.OnReceived(frame);
+                return;
+            }
+
+            // ── kind=14 会议代坐: 新身体代坐旧座位(重连者 → 全场; 房主回播生死) ──
+            if (kind == MeetingProxy.Kind)
+            {
+                MeetingProxy.OnReceived(frame);
+                return;
+            }
+
+            // ── kind=16 重连横幅(服务端 → 全场) ──
+            if (kind == RejoinBanner.Kind)
+            {
+                RejoinBanner.OnFrame(frame);
+                return;
+            }
+
+            // ── kind=15 代坐投票(代坐者 → 房主) ──
+            if (kind == MeetingProxy.VoteKind)
+            {
+                MeetingProxy.OnVoteFrame(frame);
                 return;
             }
 

@@ -8,6 +8,10 @@
 "teams.obsSpectator" : "观战中"
 
 # ── 设置项 ──
+"options.resume.enabled" : "允许断线重连"
+"options.resume.enabled.detail" : "关闭后, 本房间掉线的玩家不保留位置, 无法重连回本局(会议中进入一并关闭)。"
+"options.resume.meetingJoin" : "允许会议中重连"
+"options.resume.meetingJoin.detail" : "开启后, 会议进行中掉线的人可以直接回到会议(以原座位投票), 新玩家也能在会议中以观战身份进入。关闭则会议中拒绝进入, 散会后再进。"
 "options.resume.revive" : "未死亡重连后保持活人"
 "options.resume.revive.detail" : "关闭后, 未死亡掉线重连会按灵魂处理。"
 "options.resume.limit" : "每局最多重连次数"
@@ -20,10 +24,10 @@
 # ── 掉线提示 ──
 # ⚠️ 这里的值【不能写 \n】: 语言文件的解析是逐行读 "键" : "值" 再剥引号,
 #    不做任何转义还原 —— 写 \n 就会在游戏里原样显示成两个字符。
-"prompt.disconnected" : "与服务器的连接意外中断。（注意: 断线重连仅在最新版 Fmpostor 服务端搭配最新版本插件时生效, 其他服务器请忽略本提示。）"
+"prompt.disconnected" : "【断线重连】这局还能回去: 重新连接这台服务器, 输入房间号 %CODE% 即可回到原来的对局, 职业和进度都会保留。注意: 只有使用帆船服务端(Fmpostor)的服务器才支持断线重连, 其他服务器请忽略本条。"
 "prompt.resumed" : "已回到对局"
-"prompt.meetingRefused" : "会议进行中, 本次重连已取消。请等会议结束后重新输入房间号进入。您的槽位依然保留, 本次不计入重连次数。"
-"prompt.reconnectFailed" : "重连失败，可能是会议正在进行或者其他网络原因。您的槽位依然保留，请稍后重试。重连失败不计入玩家重连上限！"
+"prompt.meetingRefused" : "【断线重连】会议进行中, 本次重连已取消。请等会议结束后重新连接这台服务器并输入房间号 %CODE%。你的位置依然保留, 本次不计入重连次数。"
+"prompt.reconnectFailed" : "【断线重连】这次重连没有成功(可能是会议正在进行或网络问题)。你的位置依然保留, 稍后重新连接这台服务器并输入房间号 %CODE% 再试一次, 失败不计入重连次数。注意: 只有使用帆船服务端(Fmpostor)的服务器才支持断线重连。"
 "prompt.limitReached" : "本局重连次数已用完, 请等待本局结束后再加入"
 "prompt.slotLost" : "服务器没有找到你的保留位置（可能是会议期间的重连已用掉了它），本局无法恢复原职业。"
 

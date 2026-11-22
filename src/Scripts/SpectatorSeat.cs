@@ -416,6 +416,9 @@ internal static class SpectatorSeat
 
     internal static bool AmSpectator => _amSpectator;
 
+    /// <summary>该连接是否在服务端的观战名单里。</summary>
+    internal static bool IsSpectatorClient(int clientId) => _roster.Contains(clientId);
+
     /// <summary>本机在 NoS 层的玩家对象(还没注册时返回 null)。</summary>
     internal static Virial.Game.Player? SelfNoSPlayer()
     {
@@ -474,7 +477,12 @@ internal static class SpectatorSeat
         // 观战者和重连者一样需要把对局环境搭起来(否则没有 HUD、动不了)。
         // ★ 会议期间新玩家【不可中途入场】: 与会议重连同样处理 —— 立刻踢回主菜单,
         //   回主菜单后按"重连失败(可能是会议进行中)"提示。不生成身体、不搭环境。
-        if (MeetingFlag.Active || ExileController.Instance != null)
+        //   房主支持会议中进入时例外: 服务端会把入座推迟到散会后才发观战判定, 走到这里时会议已结束。
+        //   ⚠️ 观战判定可能比房主的会议广播先到: 那时 HostSupportsMeetingJoin 还是默认的 false。
+        //      服务端只有在房主支持会议中进入时才会在会议期间发观战判定, 所以只有
+        //      【已经收到房主广播且明确不支持】时才拒绝, 没收到广播时不拒绝。
+        if ((MeetingFlag.Active || ExileController.Instance != null)
+            && MeetingFlag.HasFreshInfo && !MeetingFlag.HostSupportsMeetingJoin)
         {
             NebulaResumeEntry.Log("观战席: 会议进行中 → 不允许中途入场, 立即移出房间。");
             ResumeTransition.RefuseByMeeting("观战者-会议中");

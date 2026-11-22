@@ -8,6 +8,10 @@
 "teams.obsSpectator" : "Spectator"
 
 # ── Options ──
+"options.resume.enabled" : "Allow reconnect"
+"options.resume.enabled.detail" : "When off, players who drop are not given a reserved slot and cannot rejoin this round (joining during meetings is off too)."
+"options.resume.meetingJoin" : "Allow reconnect during meetings"
+"options.resume.meetingJoin.detail" : "When on, players who drop can come straight back into a running meeting (voting from their old seat), and new players can join as spectators during a meeting. When off, joins are refused until the meeting ends."
 "options.resume.revive" : "Stay alive after reconnect"
 "options.resume.revive.detail" : "When off, an alive player returns as a ghost."
 "options.resume.limit" : "Max reconnects per round"
@@ -20,10 +24,10 @@
 # ── Disconnect prompts ──
 # NOTE: values must not contain \n -- the addon language reader splits each line
 # on the first quote-pair and does no escape decoding, so \n shows up verbatim.
-"prompt.disconnected" : "The connection to the server was lost. (Reconnect only works with the latest Fmpostor server plus the latest version of this addon; ignore this notice on other servers.)"
+"prompt.disconnected" : "[Reconnect] You can still get back into this round: reconnect to the same server and enter room code %CODE% to return with your role and progress. Note: only servers running the Fmpostor server support reconnecting; on any other server, ignore this message."
 "prompt.resumed" : "Back in the round"
-"prompt.meetingRefused" : "A meeting is in progress, so this reconnect was cancelled. Please rejoin with the room code after the meeting ends. Your slot is still reserved and this attempt does not count against the reconnect limit."
-"prompt.reconnectFailed" : "Reconnect failed -- a meeting may be in progress, or another network problem occurred. Your slot is still reserved, please try again later. Failed reconnects do not count against the reconnect limit."
+"prompt.meetingRefused" : "[Reconnect] A meeting is in progress, so this reconnect was cancelled. After the meeting ends, reconnect to the same server and enter room code %CODE%. Your slot is still reserved and this attempt does not count against the reconnect limit."
+"prompt.reconnectFailed" : "[Reconnect] This reconnect did not succeed (a meeting may be in progress, or a network problem occurred). Your slot is still reserved: reconnect to the same server later and enter room code %CODE% to try again. Failed attempts do not count against the limit. Note: only servers running the Fmpostor server support reconnecting."
 "prompt.limitReached" : "Reconnect limit reached for this round. Please wait until it ends."
 "prompt.slotLost" : "The server could not find your reserved slot (a reconnect attempt during a meeting may have used it up), so your role cannot be restored this round."
 

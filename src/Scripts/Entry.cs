@@ -1,5 +1,5 @@
 // ============================================================
-// Entry.cs — NebulaResume 插件入口  v1.0.0
+// Entry.cs — NebulaResume 插件入口  v2.0
 //
 // 本插件是【Fmpostor 服务端断线重连功能】的客户端衔接层。
 // 它不做任何判定: 谁可以重连、保槽多久、要不要恢复, 全部由服务端决定。
@@ -51,7 +51,7 @@ public class NebulaResumeEntry
 
     public static void Preprocess(NebulaPreprocessor preprocessor)
     {
-        Log("===== NebulaResume loaded (v1.0.0) =====");
+        Log("===== NebulaResume loaded (v2.0) =====");
         Log("采集/恢复: 主职业 + 幽灵职业 + 附加职业 + 生死");
 
         // 用 MonoBehaviour 驱动采集。
@@ -82,6 +82,10 @@ public class NebulaResumeEntry
             ReconnectPrompt.Install(harmony);
             FrameGuard.Install(harmony);
             OutfitSync.Install(harmony);
+            MeetingSeat.Install(harmony);
+            MeetingDefer.Install(harmony);
+            MeetingProxy.Install(harmony);
+            EndSummary.Install(harmony);
         }
         catch (System.Exception e)
         {
@@ -194,6 +198,9 @@ public class NebulaResumeEntry
     /// <summary>是否有暂存、尚未应用的状态包(离开房间复位时要避开这个窗口)。</summary>
     internal static bool HasPendingState => _hasPendingState;
 
+    /// <summary>恢复包因本机 NoS 玩家未就绪而重试的截止时刻(0 = 不在重试)。</summary>
+    private static float _applyRetryUntil;
+
     public static void ApplyNebulaState(int playerId, int[] chunks)
     {
         // ── 会议进行中进来的玩家: 拒绝本次重连 ──
@@ -202,7 +209,7 @@ public class NebulaResumeEntry
         //
         //   ⚠️ 会议状态取自 MeetingFlag(房主广播), 不是本机 MeetingHud ——
         //      中途重连回来的人本机根本没有会议界面。
-        if (MeetingFlag.Active && !ResumeTransition.Done)
+        if (MeetingFlag.Active && !ResumeTransition.Done && !MeetingFlag.HostSupportsMeetingJoin)
         {
             ResumeTransition.RefuseByMeeting("恢复包");
             _hasPendingState = false;
@@ -260,7 +267,10 @@ public class NebulaResumeEntry
         var chunks = _pendingChunks;
         _hasPendingState = false;
         _pendingChunks = null;
-        Log("条件已满足, 应用暂存的状态包。");
+        if (_applyRetryUntil <= 0f)
+        {
+            Log("条件已满足, 应用暂存的状态包。");
+        }
         ApplyNow(pid, chunks);
     }
 
@@ -330,6 +340,8 @@ public class NebulaResumeEntry
     /// <summary>由 Entry.Tick 每帧调用: 到点后应用位置。</summary>
     internal static void TickPendingPosition()
     {
+        TickPositionVerify();
+
         if (_positionApplyAt <= 0f)
         {
             return;
@@ -344,12 +356,75 @@ public class NebulaResumeEntry
 
         try
         {
-            NebulaStateCodec.ApplyPosition(PlayerControl.LocalPlayer, _pendingPosition);
+            var lp = PlayerControl.LocalPlayer;
+            if (lp != null)
+            {
+                _snapFrom = lp.transform.position;
+            }
+
+            if (NebulaStateCodec.ApplyPosition(lp, _pendingPosition))
+            {
+                _snapTarget = new UnityEngine.Vector2(_pendingPosition.PosX / 1000f, _pendingPosition.PosY / 1000f);
+                _verifyStep = 0;
+                _verifyAt = UnityEngine.Time.unscaledTime + VerifyDelays[0];
+            }
         }
         catch (System.Exception e)
         {
             Log("位置应用异常: " + e.Message);
         }
+    }
+
+    // ── 位置复查 ──
+    //   瞬移之后, 房主那边的身体生成/网络同步偶尔会把人拉回出生点(实测"位置错误")。
+    //   瞬移后再查两次: 人离目标很远、却还停在瞬移前的地方 → 判定为被拉回, 再瞬移一次。
+    //   玩家自己走开的情况不会误判(那时他已经离开了瞬移前的位置)。
+    private static readonly float[] VerifyDelays = { 1.2f, 2.5f };
+    private static int _verifyStep = -1;
+    private static float _verifyAt;
+    private static UnityEngine.Vector2 _snapTarget;
+    private static UnityEngine.Vector2 _snapFrom;
+
+    private static void TickPositionVerify()
+    {
+        if (_verifyStep < 0 || UnityEngine.Time.unscaledTime < _verifyAt)
+        {
+            return;
+        }
+
+        try
+        {
+            var lp = PlayerControl.LocalPlayer;
+            if (lp == null || MeetingHud.Instance != null)
+            {
+                _verifyStep = -1;
+                return;
+            }
+
+            UnityEngine.Vector2 cur = lp.transform.position;
+            var offTarget = UnityEngine.Vector2.Distance(cur, _snapTarget) > 1.0f;
+            var stillAtOld = UnityEngine.Vector2.Distance(cur, _snapFrom) < 0.8f;
+
+            if (offTarget && stillAtOld)
+            {
+                NebulaStateCodec.ApplyPosition(lp, _pendingPosition);
+                Log("位置复查: 被拉回原处 (" + cur.x.ToString("F2") + ", " + cur.y.ToString("F2") + ") → 已重新瞬移。");
+            }
+            else if (_verifyStep == 0)
+            {
+                Log("位置复查: 位置正常。");
+            }
+        }
+        catch { }
+
+        _verifyStep++;
+        if (_verifyStep >= VerifyDelays.Length)
+        {
+            _verifyStep = -1;
+            return;
+        }
+
+        _verifyAt = UnityEngine.Time.unscaledTime + VerifyDelays[_verifyStep] - VerifyDelays[_verifyStep - 1];
     }
 
     /// <summary>本局已经重连过几次(仅本机视角)。</summary>
@@ -431,9 +506,30 @@ public class NebulaResumeEntry
 
         if (target == null)
         {
-            Log("恢复中止: 本机 NoS 玩家尚未注册(LocalPlayer 为空)。");
+            // 不丢包: 本机角色/NoS 玩家晚到时先补注册, 放回暂存, 下一轮再试(最多 15 秒)。
+            //   早先这里直接 return, 恢复包就永久丢了 —— 表现是"重连后没职业"。
+            var nowRetry = UnityEngine.Time.unscaledTime;
+            if (_applyRetryUntil <= 0f)
+            {
+                _applyRetryUntil = nowRetry + 15f;
+                Log("恢复推迟: 本机 NoS 玩家尚未注册 → 补注册后重试(最多 15 秒)。");
+            }
+
+            if (nowRetry < _applyRetryUntil)
+            {
+                try { ResumeTransition.EnsureLocalNoS(); } catch { }
+                _hasPendingState = true;
+                _pendingPlayerId = playerId;
+                _pendingChunks = chunks;
+                return;
+            }
+
+            _applyRetryUntil = 0f;
+            Log("恢复中止: 15 秒内本机 NoS 玩家仍未注册(LocalPlayer 为空)。");
             return;
         }
+
+        _applyRetryUntil = 0f;
 
         if (NebulaStateCodec.Apply(target, PlayerControl.LocalPlayer, snap, out var detail))
         {
@@ -465,7 +561,10 @@ public class NebulaResumeEntry
 
             if (lp != null)
             {
-                if (snap.IsDead)
+                // 会议中重连、代坐期间被放逐: 状态包里还是"掉线前存活", 但这个人已经被投出去了。
+                var exiledInMeeting = MeetingSeat.ConsumeExiled();
+
+                if (snap.IsDead || exiledInMeeting)
                 {
                     NebulaStateCodec.MakeGhostLocal(lp, target);
                     _resumedAsGhost = true;
@@ -473,7 +572,9 @@ public class NebulaResumeEntry
                     // 上报死者身份: 服务端据此广播名册, 让全场都按"已死"处理。
                     DeadRoster.MarkSelfResumed(true);
 
-                    Log("重连终态: 掉线前已死亡 → 恢复为灵魂。");
+                    Log(exiledInMeeting
+                        ? "重连终态: 会议中代坐时被放逐 → 恢复为灵魂。"
+                        : "重连终态: 掉线前已死亡 → 恢复为灵魂。");
                 }
                 else
                 {
@@ -527,13 +628,26 @@ public class NebulaResumeEntry
 
         // ── 位置恢复 ──
         //   用 RpcSnapTo 瞬移回掉线时的坐标; 延迟一帧以免和角色生成撞车。
+        //   掉线后开过会 → 不回掉线处, 改为散会后的默认位置(会议桌), 见 RejoinNotice.cs。
         try
         {
-            _pendingPosition = snap;
-            _positionApplyAt = UnityEngine.Time.unscaledTime + 0.35f;
-            Log("位置恢复: 已排程(0.35 秒后瞬移)。");
+            var placed = snap;
+            var restoreOld = RejoinPlacement.Decide(ref placed);
+            if (placed.HasPosition)
+            {
+                _pendingPosition = placed;
+                _positionApplyAt = UnityEngine.Time.unscaledTime + 0.35f;
+                Log(restoreOld ? "位置恢复: 已排程(0.35 秒后瞬移回掉线处)。" : "位置: 已排程(0.35 秒后瞬移到会议桌)。");
+            }
+            else
+            {
+                _positionApplyAt = 0f;
+            }
         }
-        catch { }
+        catch (System.Exception pe)
+        {
+            Log("位置决定异常: " + pe.Message);
+        }
 
         // 房主序列化可能把本机重新拉回活人态 → 仅对"灵魂"持续对账。
         if (_resumedAsGhost)
@@ -627,6 +741,13 @@ public class NebulaResumeEntry
             return;
         }
 
+        // 房主支持会议中进入时, 过渡本来就要等散会才做(会议画面由 MeetingDefer 负责):
+        //   会议期间不必每 2 秒再请求一次(原来会刷几十条"兜底"日志)。散会后这里照常兜底。
+        if (MeetingFlag.Active && MeetingFlag.HostSupportsMeetingJoin)
+        {
+            return;
+        }
+
         if (!SpectatorSeat.AmSpectator && !SpawnGuard.IsMidRoundLocal())
         {
             return;   // 正常开局玩家, 不插手
@@ -698,6 +819,21 @@ public class NebulaResumeEntry
         }
 
         if (!MeetingFlag.Active)
+        {
+            return;
+        }
+
+        // 还没收到房主的会议广播(里面带"是否支持会议中进入"): 先等, 不能按"不支持"处理。
+        //   实测: 刚进房时本机已经有会议界面(Active=true), 但房主的广播晚到几百毫秒 ——
+        //   原来在这段空档里就把自己踢出了房间(新玩家第一次进房弹出大厅界面后被移出)。
+        //   房主每 3 秒广播一次; 不支持会议中进入的房主照旧会在会议后处理这个连接。
+        if (!MeetingFlag.HasFreshInfo)
+        {
+            return;
+        }
+
+        // 房主支持会议中进入: 留在房间里等身体和散会, 服务端会在散会后续局。
+        if (MeetingFlag.HostSupportsMeetingJoin)
         {
             return;
         }
@@ -929,6 +1065,11 @@ public class NebulaResumeEntry
             try { SpawnGuard.FastFillRoles(); } catch { }
             try { CosmeticsWarmup.Tick(); } catch { }
             try { EmergencySync.Tick(); } catch { }
+            try { MeetingSeat.Tick(); } catch { }
+            try { MeetingDefer.Tick(); } catch { }
+            try { MeetingProxy.Tick(); } catch { }
+            try { RejoinPlacement.Tick(); } catch { }
+            try { RejoinBanner.Tick(); } catch { }
 
             var now = UnityEngine.Time.unscaledTime;
             if (now < _nextTick)

@@ -38,6 +38,7 @@ internal static class FrameGuard
     {
         _armed = false;
         _swallowed = 0;
+        _skipLogged.Clear();
     }
 
     internal static void CountSwallow()
@@ -188,6 +189,90 @@ internal static class FrameGuard
         catch (System.Exception e)
         {
             NebulaResumeEntry.Log("帧保护: 挂 NoS 方法失败: " + e.Message);
+        }
+
+        // ── 空引用源头: NoS 的 PlayerUpdatePatch.Postfix ──
+        //   它在对局中对每个身体每帧执行, 最后一步直接读 ((IPlayerlike)player).VanillaCosmetics,
+        //   不判空。身体在 NoS 玩家表里查不到时(中途生成、尚未注册; 结算清理移除的旧身份),
+        //   就每个物理帧抛一次空引用 —— 帧保护日志里每 5 秒约 150 次的来源。
+        //   做法: 查不到玩家的身体跳过这一帧的 NoS 处理; 本机自己的身体照常推进 NoS 的每帧计时。
+        try
+        {
+            var t = ResumeTransition.Find("Nebula.Patches.PlayerUpdatePatch");
+            var post = t?.GetMethod("Postfix", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+            if (post != null)
+            {
+                harmony.Patch(post, prefix: new HarmonyMethod(
+                    AccessTools.Method(typeof(FrameGuard), nameof(NosFixedPostfixPrefix))));
+                NebulaResumeEntry.Log("帧保护: 已挂 NoS 每帧更新的空玩家保护(源头修复)。");
+            }
+            else
+            {
+                NebulaResumeEntry.Log("帧保护: 未找到 NoS PlayerUpdatePatch.Postfix, 跳过源头修复。");
+            }
+        }
+        catch (System.Exception e)
+        {
+            NebulaResumeEntry.Log("帧保护: 挂 NoS 每帧更新保护失败: " + e.Message);
+        }
+    }
+
+    private static System.Type? _ngmType;
+    private static PropertyInfo? _ngmInstanceProp;
+    private static MethodInfo? _alwaysUpdate;
+    private static PropertyInfo? _gameState;
+    private static readonly System.Collections.Generic.HashSet<byte> _skipLogged = new();
+
+    /// <summary>
+    ///     NoS PlayerUpdatePatch.Postfix(PlayerControl __instance) 的前缀。
+    ///     NoS 的参数名就叫 __instance, 在静态方法上 Harmony 会把它当特殊名, 所以按位置取 __0。
+    /// </summary>
+    private static bool NosFixedPostfixPrefix(PlayerControl __0)
+    {
+        try
+        {
+            if (__0 == null)
+            {
+                return false;
+            }
+
+            // 常见路径: 查得到玩家 → 直接交给 NoS(不走反射, 每帧开销可忽略)。
+            if (Virial.Game.Player.GetPlayer(__0.PlayerId) != null)
+            {
+                return true;
+            }
+
+            _ngmType ??= ResumeTransition.Find("Nebula.Game.NebulaGameManager");
+            _ngmInstanceProp ??= _ngmType?.GetProperty("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+            var ngm = _ngmInstanceProp?.GetValue(null);
+            if (ngm == null)
+            {
+                return true;
+            }
+
+            _gameState ??= _ngmType!.GetProperty("GameState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (_gameState?.GetValue(ngm)?.ToString() == "NotStarted")
+            {
+                return true;   // 大厅阶段 NoS 自己有 try/catch
+            }
+
+            // 查不到玩家: 跳过。本机身体仍推进 NoS 的"总是更新"(原方法第一步)。
+            if (__0.AmOwner)
+            {
+                _alwaysUpdate ??= _ngmType!.GetMethod("OnFixedAlwaysUpdate", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                _alwaysUpdate?.Invoke(ngm, new object[] { UnityEngine.Time.fixedDeltaTime });
+            }
+
+            if (_skipLogged.Add(__0.PlayerId))
+            {
+                NebulaResumeEntry.Log("帧保护: 身体 playerId=" + __0.PlayerId + " 在 NoS 玩家表里查不到, 跳过它的 NoS 每帧处理(避免每帧空引用)。");
+            }
+
+            return false;
+        }
+        catch
+        {
+            return true;
         }
     }
 

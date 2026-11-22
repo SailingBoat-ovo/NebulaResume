@@ -602,7 +602,9 @@ internal static class NebulaStateCodec
             try
             {
                 var mod = NebulaAPI.Assignables.GetModifierById(mods[i].Id);
-                if (mod != null)
+                // 已经有的附加职业不再加: 会议中回来的人, 会议里已按旧身份装过一次,
+                //   散会后正式续局再加会变成两份(例如多出一个"紧急会议"按钮)。
+                if (mod != null && !HasModifier(player, mod))
                 {
                     player.AddModifier(mod, mods[i].Args, RoleAssignType.Standard);
                     applied++;

@@ -11,6 +11,7 @@
 //   那是模组确定数据结构的时间点, 早于设置面板的构建。
 //
 // ▸ 配置项
+//   · 允许断线重连           (默认开, 总开关)
 //   · 未死亡重连后保持活人 (默认开)
 //   · 每局最多允许重连次数   (默认 3)
 //   · 中途加入观战 / 观战人数上限
@@ -23,6 +24,20 @@ namespace NebulaResume;
 
 internal static class ResumeOptions
 {
+    /// <summary>总开关: 本房间是否允许断线重连(关掉后掉线即离开, 会议中进入一并关闭)。</summary>
+    internal static BoolConfiguration ReconnectEnabled =
+        NebulaAPI.Configurations.Configuration(
+            "options.resume.enabled",
+            true,
+            title: NebulaAPI.GUI.LocalizedTextComponent("options.resume.enabled"));
+
+    /// <summary>会议进行中是否允许重连/新玩家进入(需要总开关也开着)。关掉则会议中拒绝进入, 散会后再进。</summary>
+    internal static BoolConfiguration MeetingJoinEnabled =
+        NebulaAPI.Configurations.Configuration(
+            "options.resume.meetingJoin",
+            true,
+            title: NebulaAPI.GUI.LocalizedTextComponent("options.resume.meetingJoin"));
+
     /// <summary>未死亡掉线重连后是否保持活人。关掉则转为灵魂。</summary>
     internal static BoolConfiguration ReviveOnReconnect =
         NebulaAPI.Configurations.Configuration(
@@ -53,6 +68,8 @@ internal static class ResumeOptions
             2,
             title: NebulaAPI.GUI.LocalizedTextComponent("options.resume.spectator.limit"));
 
+    internal static bool ReconnectAllowed => ReconnectEnabled;
+    internal static bool MeetingJoinAllowed => ReconnectEnabled && MeetingJoinEnabled;
     internal static bool ReviveEnabled => ReviveOnReconnect;
     internal static int Limit => ReconnectLimit;
     internal static bool SpectatorOn => SpectatorEnabled;
@@ -73,18 +90,20 @@ public static class ResumeOptionsRegister
         try
         {
             var holder = NebulaAPI.Configurations.Holder(
-                title: NebulaAPI.GUI.RawTextComponent("断线重连"),
+                title: NebulaAPI.GUI.RawTextComponent("帆船服断线重连"),
                 detail: NebulaAPI.GUI.RawTextComponent("掉线后重新进入本服务器即可回到原对局。"),
                 tabs: new[] { ConfigurationTab.Settings },
                 gamemodes: GameModes.AllGameModes);
 
             // 访问静态字段会触发它们的初始化(创建配置项), 再挂进容器。
-            holder.AppendConfiguration(ResumeOptions.ReviveOnReconnect)
+            holder.AppendConfiguration(ResumeOptions.ReconnectEnabled)
+                  .AppendConfiguration(ResumeOptions.MeetingJoinEnabled)
+                  .AppendConfiguration(ResumeOptions.ReviveOnReconnect)
                   .AppendConfiguration(ResumeOptions.ReconnectLimit)
                   .AppendConfiguration(ResumeOptions.SpectatorEnabled)
                   .AppendConfiguration(ResumeOptions.SpectatorLimit);
 
-            NebulaResumeEntry.Log("设置项: 已注册到设置面板(未死亡重连后保持活人 / 每局最多重连次数)。");
+            NebulaResumeEntry.Log("设置项: 已注册到设置面板「帆船服断线重连」(允许断线重连 / 允许会议中重连 / 未死亡重连后保持活人 / 每局最多重连次数 / 观战)。");
         }
         catch (System.Exception e)
         {

@@ -54,6 +54,91 @@ internal static class ResumeTransition
     /// <summary>挂起期间的重试间隔(秒)。</summary>
     private const float RetryInterval = 0.2f;
 
+    /// <summary>等本机角色就位的最长时间(秒)。超过就照常继续(后续步骤会补做)。</summary>
+    private const float WaitForLocalBody = 20f;
+
+    private static float _waitLogAt;
+
+    /// <summary>
+    ///     本机角色是否已经可以承接续局: 地图在、本机角色在、资料在、原版职业在。
+    /// </summary>
+    internal static bool LocalBodyReady(out string why)
+    {
+        why = "";
+        try
+        {
+            if (ShipStatus.Instance == null) { why = "地图未加载"; return false; }
+            var lp = PlayerControl.LocalPlayer;
+            if (lp == null) { why = "本机角色未生成"; return false; }
+            if (lp.Data == null) { why = "本机资料未同步"; return false; }
+            if (lp.Data.Role == null) { why = "本机原版职业未就位"; return false; }
+            return true;
+        }
+        catch (System.Exception e)
+        {
+            why = "检查异常 " + e.GetType().Name;
+            return false;
+        }
+    }
+
+    /// <summary>本机玩家是否已经注册进本机 NoS。</summary>
+    internal static bool LocalInNoS()
+    {
+        try
+        {
+            var lp = PlayerControl.LocalPlayer;
+            return lp != null && Virial.Game.Player.GetPlayer(lp.PlayerId) != null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    ///     兜底: 本机玩家不在 NoS 里 / NoS 还没切到对局阶段时补做一次(只补缺的部分)。
+    ///     由恢复包重试、会议延迟搭建调用。
+    /// </summary>
+    internal static void EnsureLocalNoS()
+    {
+        if (_nosStarted && LocalInNoS())
+        {
+            return;
+        }
+
+        var lp = PlayerControl.LocalPlayer;
+        if (lp == null || lp.Data == null)
+        {
+            return;
+        }
+
+        RebuildLocalNoS();
+    }
+
+    /// <summary>异常的真正原因(反射调用会包一层 TargetInvocationException)+ 第一帧位置。</summary>
+    internal static string Describe(System.Exception e)
+    {
+        var inner = e;
+        while (inner is TargetInvocationException && inner.InnerException != null)
+        {
+            inner = inner.InnerException;
+        }
+
+        var frame = "";
+        try
+        {
+            var st = inner.StackTrace;
+            if (!string.IsNullOrEmpty(st))
+            {
+                var line = st.Split('\n')[0].Trim();
+                frame = " @ " + (line.Length > 160 ? line.Substring(0, 160) : line);
+            }
+        }
+        catch { }
+
+        return inner.GetType().Name + " : " + inner.Message + frame;
+    }
+
     /// <summary>进入新对局时复位, 让下一次重连还能做过渡。</summary>
     internal static void Reset()
     {
@@ -64,7 +149,58 @@ internal static class ResumeTransition
         _hideLogged.Clear();
         _hideUiAt = 0f;
         _diagAt = 0f;
+        _nosStarted = false;
         ClearRefusal();
+    }
+
+    /// <summary>
+    ///     本机 NoS 层是否已经切到对局阶段(OnGameStart 只能调一次)。
+    ///     只随新对局复位(<see cref="Reset"/>), 收到续局信号的 BeginAttempt 不复位。
+    /// </summary>
+    private static bool _nosStarted;
+
+    /// <summary>
+    ///     会议界面即将在一台"中途进来、还没续局"的机器上搭建: 先把 NoS 层准备好。
+    /// </summary>
+    /// <remarks>
+    ///     会议中进来的重连者会随房间数据收到会议对象, 而本机的 NoS 玩家表此时还是空的 ——
+    ///     模组的开会补丁按玩家读职业、外观, 读到空就中断, 会议界面只搭一半。
+    ///     这里提前做续局里"重建 NoS 层"那一步(注册全场玩家 + 占位职业 + 切到对局阶段),
+    ///     其余步骤(界面切换、位置、职业恢复)仍然等散会后的正式续局。
+    ///     判据不依赖任何消息: 对局场景已经在(有 ShipStatus), 而本机 NoS 还没开始。
+    /// </remarks>
+    internal static void PrepareForMeeting()
+    {
+        if (_done || _nosStarted || ShipStatus.Instance == null)
+        {
+            return;
+        }
+
+        // 本机角色还没生成时不做: NoS 开局要读本机玩家, 读到空会半初始化且不能重来。
+        //   这种情况由 MeetingDefer 先把会议界面的搭建推迟, 角色到了再调本方法。
+        var lpNow = PlayerControl.LocalPlayer;
+        if (lpNow == null || lpNow.Data == null)
+        {
+            return;
+        }
+
+        try
+        {
+            var ngmType = FindType("Nebula.Game.NebulaGameManager");
+            var ngm = ngmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null);
+            var state = ngm == null ? null : ngmType!.GetProperty("GameState", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(ngm);
+            if (ngm == null || state == null || state.ToString() != "NotStarted")
+            {
+                return;   // 正常开局的机器: NoS 早已在对局阶段
+            }
+
+            NebulaResumeEntry.Log("会议中进入: 会议界面搭建前先重建本机 NoS 层。");
+            RebuildLocalNoS();
+        }
+        catch (System.Exception e)
+        {
+            NebulaResumeEntry.Log("会议中进入: 预备 NoS 层失败: " + e.Message);
+        }
     }
 
     // ══════════════════════════════════════════════════════════
@@ -136,7 +272,9 @@ internal static class ResumeTransition
         try
         {
             NebulaResumeEntry.Log("重连拒绝: 已把本机移出房间(回主菜单), 请等会议结束后重新进入服务器。");
-            AmongUsClient.Instance.ExitGame(DisconnectReasons.ExitGame);
+            ReconnectPrompt.PluginExiting = true;
+            try { AmongUsClient.Instance.ExitGame(DisconnectReasons.ExitGame); }
+            finally { ReconnectPrompt.PluginExiting = false; }
         }
         catch (System.Exception e)
         {
@@ -196,6 +334,16 @@ internal static class ResumeTransition
                 ClearRefusal();
             }
 
+            // 离开房间后 NoS 的对局对象随之销毁: "本机 NoS 已开局"的标记必须一起清掉。
+            //   原来只在过渡做过/挂起时才复位, 被会议拒绝而离开时它残留为 true ——
+            //   下次进房重建 NoS 时就跳过了"切到对局阶段 + OnGameStart", NoS 只开了一半:
+            //   失效玩家清扫不工作, 有人离场后每帧读已销毁的身体(日志刷 SEHException)。
+            if (_nosStarted)
+            {
+                NebulaResumeEntry.Log("已离开房间 → 复位本机 NoS 开局标记。");
+                _nosStarted = false;
+            }
+
             if ((_done || _pendingRun) && !NebulaResumeEntry.HasPendingState)
             {
                 NebulaResumeEntry.Log("已离开房间 → 复位过渡状态(下一次进房会重新执行过渡)。");
@@ -251,6 +399,29 @@ internal static class ResumeTransition
     ///      导致之后的重连者跳过会议拒绝。
     /// </summary>
     private static bool _forSpectator;
+
+    /// <summary>
+    ///     本机确实已离开房间: 未加入 + 无船 + 无大厅, 并且持续了 LeftRoomStableSeconds
+    ///     (由 TickLeaveRoomReset 每帧记时; 重连途中短暂的 NotJoined 不算)。
+    /// </summary>
+    private static bool LeftRoom()
+    {
+        try
+        {
+            var client = AmongUsClient.Instance;
+            return client != null
+                   && client.GameState == InnerNetClient.GameStates.NotJoined
+                   && ShipStatus.Instance == null
+                   && LobbyBehaviour.Instance == null
+                   && GameData.Instance == null
+                   && _leftRoomSince > 0f
+                   && UnityEngine.Time.unscaledTime - _leftRoomSince >= LeftRoomStableSeconds;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     /// <summary>结束当前挂起的请求(连同它的观战标记)。</summary>
     private static void EndPending()
@@ -356,8 +527,16 @@ internal static class ResumeTransition
         //
         //   ⚠️ 观战者例外: 观战是全新身份, 不需要恢复任何状态, 会议期间照常入场。
         //      否则新玩家会被误判成"重连被拒"而直接掐掉(职业装不上、灵魂固定不了)。
+        // 房主支持会议中进入: 重连者和观战者都不拒绝, 界面切换原地等到散会
+        //   (会议画面由 MeetingDefer 负责; 观战者的职业/灵魂由 SpectatorSeat 当场装好, 不等这里)。
+        if (MeetingFlag.HostSupportsMeetingJoin && (ExileController.Instance != null || MeetingFlag.Active))
+        {
+            return;
+        }
+
         if (!_forSpectator && (ExileController.Instance != null || MeetingFlag.Active))
         {
+
             // ★ 先挂起等待, 不要立刻判死。
             //   已观察到: 会议刚结束那几秒里, 房主的会议状态广播可能还是 1,
             //   而本机其实已经没有会议界面了 —— 这时直接拒绝会把人踢出去,
@@ -394,6 +573,39 @@ internal static class ResumeTransition
 
             NebulaResumeEntry.Log("续局过渡: " + (int)WaitForMeetingInfo
                 + " 秒内没收到房主的会议状态广播 → 按'不在会议中'继续。");
+        }
+
+        // ── 等本机角色就位 ──
+        //   续局信号有时比本机角色先到(实测: 同一套流程, 角色已在场时一切正常;
+        //   角色还没生成时 HUD、NoS 开局全部空引用, 恢复包无处可落 →
+        //   没职业 + 大厅 UI 退不掉)。所以先等角色、资料、原版职业都到齐再切。
+        if (!LocalBodyReady(out var notReady))
+        {
+            var nowWait = UnityEngine.Time.unscaledTime;
+            if (nowWait - _requestedAt < WaitForLocalBody)
+            {
+                if (nowWait >= _waitLogAt)
+                {
+                    _waitLogAt = nowWait + 2f;
+                    NebulaResumeEntry.Log("续局过渡: 等待本机角色就位(" + notReady + ")。");
+                }
+
+                return;   // 挂起, 下一轮再试
+            }
+
+            // 等了这么久还没角色, 而且本机已经回到主菜单(被踢 / 断线) → 放弃这次过渡。
+            //   否则会在主菜单里照样"开局", 把 HUD 打开后以 0 名玩家重建, 每帧刷 HudManager 空引用。
+            //   ⚠️ 只在等待超时这一处判断: 刚进房时本机状态也可能短暂像"不在房间", 不能一开始就判。
+            if (LeftRoom())
+            {
+                EndPending();
+                _done = true;
+                NebulaResumeEntry.Log("续局过渡: 等待超时且本机已回到主菜单(被踢或断线) → 放弃这次过渡。");
+                return;
+            }
+
+            NebulaResumeEntry.Log("续局过渡: 等待本机角色超过 " + (int)WaitForLocalBody
+                + " 秒(" + notReady + ") → 仍然继续, 后续步骤会自动补做。");
         }
 
         EndPending();
@@ -452,7 +664,7 @@ internal static class ResumeTransition
                 NebulaResumeEntry.Log("续局过渡 4/5: SetHudActive(true)。");
             }
         }
-        catch (System.Exception e) { NebulaResumeEntry.Log("续局过渡 4/5 失败: " + e.Message); }
+        catch (System.Exception e) { NebulaResumeEntry.Log("续局过渡 4/5 失败: " + Describe(e)); }
 
         // ── ⑤ 重建本机 NoS 层 ──
         RebuildLocalNoS();
@@ -593,8 +805,18 @@ internal static class ResumeTransition
 
             // ── 切 NoS 游戏阶段 ──
             // GameState 不是 Initialized 时, HUD 会停在大厅态、职业显示 unassigned。
+            // 只做一次: 会议中进入时会议前已经做过, 散会后的正式续局不能再调 OnGameStart。
+            // 本机玩家必须已经在 NoS 里: OnGameStart 会读本机玩家的职业与外观,
+            //   读到空就中途抛出, NoS 停在半初始化(没职业、HUD 不切)且不能再调第二次。
+            //   本机还不在时先不切, 由 EnsureLocalNoS 在角色到达后补做。
+            if (!_nosStarted && !LocalInNoS())
+            {
+                NebulaResumeEntry.Log("重建: 本机玩家还不在 NoS 里 → 暂不切对局阶段, 角色到达后补做。");
+            }
+            else if (!_nosStarted)
             try
             {
+                _nosStarted = true;
                 var ngsType = FindType("Nebula.Game.NebulaGameStates");
                 var setter = ngmType.GetProperty("GameState",
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetSetMethod(true);
@@ -614,7 +836,7 @@ internal static class ResumeTransition
             }
             catch (System.Exception pe)
             {
-                NebulaResumeEntry.Log("重建: NoS 阶段切换异常: " + pe.Message);
+                NebulaResumeEntry.Log("重建: NoS 阶段切换异常: " + Describe(pe));
             }
 
             // ── 地图已加载时, 用带角色的重载把 HUD 切到游戏态 ──
@@ -623,8 +845,10 @@ internal static class ResumeTransition
                 var lp = PlayerControl.LocalPlayer;
                 var hud = HudManager.Instance;
 
+                // 会议进行中不切 HUD(会议界面盖在上面, 散会后的正式续局会再切一次)。
                 if (ShipStatus.Instance != null && hud != null && lp != null
-                    && lp.Data != null && lp.Data.Role != null)
+                    && lp.Data != null && lp.Data.Role != null
+                    && MeetingHud.Instance == null && ExileController.Instance == null)
                 {
                     hud.SetHudActive(lp, lp.Data.Role, true);
                     NebulaResumeEntry.Log("重建: 已 SetHudActive(LocalPlayer, Role, true)。");
@@ -699,6 +923,12 @@ internal static class ResumeTransition
         invoker?.GetType()
             .GetMethod("InvokeLocal", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
             ?.Invoke(invoker, null);
+
+        // 占位船员只为让 NoS 对象完整, 记下这个职业实例: 结算总结里不显示它。
+        if (ReferenceEquals(definedRole, PlaceholderCrewmate()))
+        {
+            try { EndSummary.NotePlaceholder((nosPlayer as Virial.Game.Player)?.Role); } catch { }
+        }
     }
 
     /// <summary>屏幕上弹一条提示(游戏原生的弹出式提示)。</summary>
@@ -730,7 +960,8 @@ internal static class ResumeTransition
         //   (Entry.TickEnvironmentFallback)是两套并行触发 —— 会出现
         //   "大厅 UI 藏掉了, 职业却没装"。现在"没收到续局信号"的情况
         //   统一由环境兜底去调 Run(), 这里不再自己判断。
-        if (RefusedByMeeting || (!_done && !_pendingRun))
+        // 会议中进来的人: 续局要等散会, 但会议期间大厅界面(等待主持人/房间信息)也不该露出来。
+        if (RefusedByMeeting || (!_done && !_pendingRun && !MeetingDefer.Engaged))
         {
             return;
         }

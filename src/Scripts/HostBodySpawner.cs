@@ -173,7 +173,10 @@ internal static class HostBodySpawner
             //
             //   ⚠️ 这里【只入队】: KickPlayer 会发包, 而本方法运行在收包回调里,
             //      直接调用等于在网络层读消息的中途重入网络层。真正执行在 Tick。
-            if (MeetingHud.Instance != null || ExileController.Instance != null)
+            //   ★ 开了"允许会议中重连"时例外: 服务端只会在会议中给【观战者】发这条指令
+            //     (重连者的续局推迟到散会), 观战者要一具身体才能和死者聊天 →
+            //     照常入队, 会议中就生成(放逐动画期间先等着, 动画结束再生成)。
+            if ((MeetingHud.Instance != null || ExileController.Instance != null) && !MeetingSpawnAllowed())
             {
                 if (!_kickQueue.Contains(clientId))
                 {
@@ -348,7 +351,7 @@ internal static class HostBodySpawner
                 continue;
             }
 
-            if (!HostSpawnEnvironmentReady(client))
+            if (!HostSpawnEnvironmentReady(client, MeetingSpawnAllowed()))
             {
                 if (now >= _directiveEnvLogAt)
                 {
@@ -763,7 +766,20 @@ internal static class HostBodySpawner
     /// <summary>
     ///     房主端补生成的环境前置条件。任何一条不满足都【只是稍后再试】, 不是失败。
     /// </summary>
-    private static bool HostSpawnEnvironmentReady(AmongUsClient client)
+    /// <summary>开了"允许会议中重连": 服务端的补生成指令在会议中也照做(只针对观战者)。</summary>
+    private static bool MeetingSpawnAllowed()
+    {
+        try { return ResumeOptions.MeetingJoinAllowed; } catch { return false; }
+    }
+
+    private static bool HostSpawnEnvironmentReady(AmongUsClient client) => HostSpawnEnvironmentReady(client, false);
+
+    /// <param name="allowMeeting">
+    ///     true: 会议界面开着也可以生成(服务端指令、会议中进入的观战者)。
+    ///     新身体不会加进已有的会议投票格(会议只按开始时的名单搭建), 所以不影响这场会议;
+    ///     放逐动画期间仍然不生成。
+    /// </param>
+    private static bool HostSpawnEnvironmentReady(AmongUsClient client, bool allowMeeting)
     {
         try
         {
@@ -789,7 +805,12 @@ internal static class HostBodySpawner
             //    MeetingHud 的 PlayerVoteArea 是按开局时的人数一次性建好的定长结构,
             //    ExileController 同理会按当时的玩家集合播动画 —— 中途插进一个新的
             //    PlayerId, 两边都会当场越界或空引用。等散会再造, 最多多等几秒。
-            if (MeetingHud.Instance != null || ExileController.Instance != null)
+            if (ExileController.Instance != null)
+            {
+                return false;
+            }
+
+            if (MeetingHud.Instance != null && !allowMeeting)
             {
                 return false;
             }

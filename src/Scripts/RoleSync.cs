@@ -168,6 +168,15 @@ internal static class RoleSync
             NebulaStateCodec.ApplyRolesLocal(subject, snap, out var detail);
             _received++;
             NebulaResumeEntry.Log("职业同步: playerId=" + subjectId + " 职业Id=" + snap.Role.Id + " :: " + detail);
+
+            // 会议中进来: 这个人是本机的旧身份 → 本机身上也显示同样的职业。
+            //   只在本机生效; 散会后的正式恢复会再按状态包下发一次(全场)。
+            if (MeetingSeat.Active && subjectId == MeetingSeat.OldPlayerId)
+            {
+                var self = Player.GetPlayer(lp.PlayerId);
+                NebulaStateCodec.ApplyRolesLocal(self, snap, out var selfDetail);
+                NebulaResumeEntry.Log("职业同步: 会议中按旧身份 playerId=" + subjectId + " 显示本机职业 :: " + selfDetail);
+            }
         }
         catch (System.Exception e)
         {

@@ -34,6 +34,12 @@ internal static class RoomCapability
     /// <summary>能力标志: 支持对局中放行观战者。</summary>
     internal const int FlagSpectator = 1 << 1;
 
+    /// <summary>
+    ///     会议中进入: 有保槽的重连者会议期间也能进房, 以旧身份的座位参加这场会议,
+    ///     散会后再正常续局。(1 &lt;&lt; 2 曾被一个已撤回的试验用过, 故意跳过。)
+    /// </summary>
+    internal const int FlagMeetingJoin = 1 << 3;
+
     /// <summary>上报间隔(秒)。</summary>
     private const float Interval = 4f;
 
@@ -76,8 +82,13 @@ internal static class RoomCapability
 
             _nextAt = now + Interval;
 
-            // 本房间支持的能力
-            var flags = FlagReconnect;
+            // 本房间支持的能力: 重连, 以及会议中进入(散会后再续局, 见 MeetingSeat)。
+            //   设置里关掉「允许断线重连」→ 两者都不声明, 服务端就不给掉线的人保槽。
+            var reconnectOn = true;
+            try { reconnectOn = ResumeOptions.ReconnectAllowed; } catch { }
+            var meetingJoinOn = reconnectOn;
+            try { meetingJoinOn = ResumeOptions.MeetingJoinAllowed; } catch { }
+            var flags = (reconnectOn ? FlagReconnect : 0) | (meetingJoinOn ? FlagMeetingJoin : 0);
 
             // 观战: 只有模组的观战开关打开时才声明。
             try
@@ -111,7 +122,8 @@ internal static class RoomCapability
                 if (sent)
                 {
                     _lastSent = signature;
-                    NebulaResumeEntry.Log("房间能力: 已声明 重连=是 观战="
+                    NebulaResumeEntry.Log("房间能力: 已声明 重连=" + (reconnectOn ? "是" : "否")
+                        + " 会议中进入=" + (meetingJoinOn ? "是" : "否") + " 观战="
                         + (((flags & FlagSpectator) != 0) ? "是" : "否")
                         + " 上限=" + spectatorMax);
                 }

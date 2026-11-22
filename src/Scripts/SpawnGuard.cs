@@ -254,6 +254,9 @@ internal static class SpawnGuard
                     FrameGuard.Reset();
                     DeadRoster.Reset();
                     SpectatorSeat.Reset();
+                    MeetingSeat.Reset();
+                    MeetingDefer.Reset();
+                    MeetingProxy.Reset();
                 }
 
                 return;

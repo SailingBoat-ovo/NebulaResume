@@ -173,6 +173,9 @@ internal static class OutfitSync
     /// <summary>MeetingHud.Start 之前跑: 保证投票格能拿到非空外观。</summary>
     private static void MeetingStartPrefix()
     {
+        // 会议中进来、还没续局的机器: 先把本机 NoS 层准备好(正常机器上什么都不做)。
+        try { ResumeTransition.PrepareForMeeting(); } catch { }
+
         try
         {
             var n = FixAllNow();

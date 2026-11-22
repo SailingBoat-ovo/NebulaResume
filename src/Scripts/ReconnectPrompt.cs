@@ -2,15 +2,14 @@
 // ReconnectPrompt.cs — 掉线提示  v27
 //
 // ── 这一版做了什么 ─────────────────────────────────────────
-//   · 不再给原生掉线弹窗"追加文字"(该方式不稳定, 玩家经常看不到提示)
-//   · 改为: 检测到非主动的断开 → 【调用游戏原生的掉线弹窗】显示一条明确的提示,
-//     告诉玩家"连接意外中断, 重新进入本服务器即可回到这一局"。
-//     不显示房间号 —— 玩家重新进服后房间仍在, 直接输入该房间号即可;
-//     房间号在大厅界面上本来就一直可见。
+//   · 游戏自己的掉线报错(超时 / 被踢 / 服务器关闭 ...)原样显示, 不再被替换。
+//   · 非主动的断开: 在报错下方追加一段重连说明, 带上刚才的房间号,
+//     并写明只有帆船服务端(Fmpostor)的服务器才支持。
+//   · 游戏没有弹窗时(例如本插件主动退出), 才单独弹出这段说明。
 //
 // ── 设计原则 ───────────────────────────────────────────────
-//   · 只用游戏自带的 UI(DisconnectPopup.ShowCustom), 不自绘任何窗口
-//   · 不改游戏原有弹窗的内容与逻辑
+//   · 只用游戏自带的 UI(DisconnectPopup), 不自绘任何窗口
+//   · 游戏原有弹窗的内容只追加、不删改
 //   · 提示只弹一次, 回到房间后自动复位
 // ============================================================
 
@@ -28,9 +27,9 @@ internal static class ReconnectPrompt
 
     internal static void Install(Harmony harmony)
     {
-        // 不挂任何补丁: 提示改为在 Tick 里主动调用原生弹窗,
-        // 避免与游戏自己的弹窗显示流程互相干扰。
-        NebulaResumeEntry.Log("掉线提示: 使用游戏原生弹窗(不挂补丁)。");
+        // 只在游戏弹窗显示/改字之后补一段说明, 不改它原来的内容与逻辑。
+        InstallPopupHooks(harmony);
+        NebulaResumeEntry.Log("掉线提示: 保留游戏原本的报错, 重连说明追加在下方。");
     }
 
     /// <summary>由 Entry.Tick 每帧调用。</summary>
@@ -50,8 +49,13 @@ internal static class ReconnectPrompt
 
             var now = UnityEngine.Time.unscaledTime;
 
+            TickHint();
+
             if (inRoom)
             {
+                RememberRoomCode(client);
+                _pendingHint = null;
+
                 if (!_wasInRoom)
                 {
                     _roomEnteredAt = now;
@@ -105,6 +109,16 @@ internal static class ReconnectPrompt
             //   注: 本插件"会议中拒绝"也是用 ExitGame 退出的, 但那条路径已经提前置了 _failed。
             var reason = client.LastDisconnectReason.ToString();
             var voluntary = reason == "ExitGame" || reason == "IntentionalLeaving" || reason == "NewConnection";
+
+            // 玩家自己点了退出(ExitGame 被调用, 且不是本插件发起的):
+            //   游戏的 LastDisconnectReason 在主动退出时不一定会更新(可能还是上一次的值),
+            //   所以以"刚刚调用过退出"为准。服务端对主动退出也不保留位置, 不能再提示"可以重连"。
+            if (now - _manualExitAt < ManualExitWindowSeconds)
+            {
+                voluntary = true;
+            }
+
+            NebulaResumeEntry.Log("离开房间: 原因=" + reason + (voluntary ? "(主动退出, 不提示重连)" : "(非主动断开)") + "。");
 
             if (!voluntary)
             {
@@ -227,80 +241,255 @@ internal static class ReconnectPrompt
         _failedByMeeting = false;
     }
 
-    /// <summary>回主菜单后弹"重连失败"提示(用游戏自带的掉线弹窗)。</summary>
+    /// <summary>回主菜单后的"重连失败"提示。</summary>
     private static void ShowFailedNotice(bool byMeeting)
     {
+        var message = byMeeting
+            ? Text("prompt.meetingRefused",
+                "【断线重连】会议进行中, 本次重连已取消。请等会议结束后重新连接这台服务器并输入房间号 %CODE%。"
+                + "你的位置依然保留, 本次不计入重连次数。")
+            : Text("prompt.reconnectFailed",
+                "【断线重连】这次重连没有成功(可能是会议正在进行或网络问题)。你的位置依然保留, "
+                + "稍后重新连接这台服务器并输入房间号 %CODE% 再试一次, 失败不计入重连次数。"
+                + "注意: 只有使用帆船服务端(Fmpostor)的服务器才支持断线重连。");
+        QueueHint(message, "重连失败提示");
+    }
+
+    /// <summary>普通的意外掉线: 在游戏原本的报错下面补一段"可以重连"的说明。</summary>
+    private static void ShowNativeNotice()
+    {
+        // 房主关掉了断线重连: 不提示"可以重连", 游戏原本的掉线弹窗原样保留。
+        var allowed = true;
+        try { allowed = ResumeOptions.ReconnectAllowed; } catch { }
+        if (!allowed)
+        {
+            NebulaResumeEntry.Log("掉线提示: 本房间已关闭断线重连, 不显示重连说明。");
+            return;
+        }
+
+        QueueHint(Text("prompt.disconnected",
+            "【断线重连】这局还能回去: 重新连接这台服务器, 输入房间号 %CODE% 即可回到原来的对局, 职业和进度都会保留。"
+            + "注意: 只有使用帆船服务端(Fmpostor)的服务器才支持断线重连, 其他服务器请忽略本条。"), "掉线提示");
+    }
+
+    // ── 附加说明: 不替换游戏的报错, 只在它下面追加 ──
+    //
+    //   游戏自己的掉线弹窗(原因: 超时 / 被踢 / 服务器关闭 ...)照常显示,
+    //   本插件只在原文末尾空一行补上重连说明和房间号。
+    //   弹窗还没出来时先挂起, 弹窗出现(DoShow / SetText / ShowCustom 之后)再补;
+    //   等一会儿游戏都没弹窗(例如本插件自己主动退出的情况), 才单独弹出说明。
+
+    /// <summary>最近一次在房间里看到的房间号。</summary>
+    private static string _lastRoomCode = "";
+
+    private static string? _pendingHint;
+    private static string _pendingTag = "";
+    private static float _pendingAt;
+    private static bool _appending;
+    private static bool _standaloneShown;
+    private static bool _appendedOnce;
+
+    /// <summary>等游戏弹窗出现的时间(秒); 超过还没有就单独弹出说明。</summary>
+    private const float HintStandaloneAfter = 2f;
+
+    /// <summary>挂起的说明最多保留多久(秒)。</summary>
+    private const float HintKeepSeconds = 20f;
+
+    private static string Text(string key, string fallback)
+    {
+        string message;
+        try { message = NebulaAPI.Language.Translate(key); } catch { message = ""; }
+        if (string.IsNullOrEmpty(message) || message.StartsWith("prompt.") || message.StartsWith("*"))
+        {
+            message = fallback;
+        }
+
+        var code = string.IsNullOrEmpty(_lastRoomCode) ? "?" : _lastRoomCode;
+        return message.Replace("%CODE%", code);
+    }
+
+    private static void RememberRoomCode(AmongUsClient client)
+    {
+        try
+        {
+            var id = client.GameId;
+            if (id != 0 && id != 32)
+            {
+                var code = InnerNet.GameCode.IntToGameName(id);
+                if (!string.IsNullOrEmpty(code))
+                {
+                    _lastRoomCode = code;
+                }
+            }
+        }
+        catch { }
+    }
+
+    private static void QueueHint(string message, string tag)
+    {
+        _pendingHint = message;
+        _pendingTag = tag;
+        _pendingAt = UnityEngine.Time.unscaledTime;
+        _standaloneShown = false;
+        _appendedOnce = false;
+        NebulaResumeEntry.Log(tag + ": 等游戏的掉线弹窗出现后追加重连说明(房间号 " + _lastRoomCode + ")。");
+        TryAppend();
+    }
+
+    /// <summary>每帧: 弹窗出现就追加; 迟迟没有弹窗就单独弹出。</summary>
+    private static void TickHint()
+    {
+        if (_pendingHint == null)
+        {
+            return;
+        }
+
+        var age = UnityEngine.Time.unscaledTime - _pendingAt;
+        if (age > HintKeepSeconds)
+        {
+            _pendingHint = null;
+            return;
+        }
+
+        if (TryAppend())
+        {
+            _appendedOnce = true;
+            return;
+        }
+
+        // 已经追加到游戏的弹窗上过(玩家看到并关掉了): 不再单独弹第二次。
+        //   之前这里会在弹窗关掉 2 秒后又单独弹一遍, 就是"被踢时提示重复"。
+        //   说明继续挂着(到期自动作废): 游戏若换场景后重新弹出同一个报错, 仍会再追加到它上面。
+        if (_appendedOnce)
+        {
+            return;
+        }
+
+        if (_standaloneShown || age < HintStandaloneAfter)
+        {
+            return;
+        }
+
+        try
+        {
+            if (DestroyableSingleton<DisconnectPopup>.InstanceExists)
+            {
+                _standaloneShown = true;
+                _appending = true;
+                try { DestroyableSingleton<DisconnectPopup>.Instance.ShowCustom(_pendingHint); }
+                finally { _appending = false; }
+
+                // 说明继续挂着: 之后若游戏自己的弹窗盖上来, 仍会再追加一次。
+                NebulaResumeEntry.Log(_pendingTag + ": 游戏没有弹出掉线窗口, 单独显示重连说明。");
+            }
+        }
+        catch { }
+    }
+
+    /// <summary>弹窗开着且还没带说明 → 在原文后面追加。返回 true 表示说明已在弹窗上。</summary>
+    private static bool TryAppend()
+    {
+        var hint = _pendingHint;
+        if (hint == null || _appending)
+        {
+            return false;
+        }
+
         try
         {
             if (!DestroyableSingleton<DisconnectPopup>.InstanceExists)
             {
-                NebulaResumeEntry.Log("重连失败提示: 原生弹窗实例不存在, 跳过。");
-                return;
+                return false;
             }
 
-            string message;
-
-            if (byMeeting)
+            var popup = DestroyableSingleton<DisconnectPopup>.Instance;
+            if (popup == null || !popup.gameObject.activeInHierarchy)
             {
-                message = NebulaAPI.Language.Translate("prompt.meetingRefused");
-
-                if (string.IsNullOrEmpty(message) || message.StartsWith("prompt.") || message.StartsWith("*"))
-                {
-                    message = "会议进行中, 本次重连已取消。请等会议结束后重新输入房间号进入。"
-                              + "您的槽位依然保留, 本次不计入重连次数。";
-                }
+                return false;
             }
-            else
+
+            var area = popup._textArea;
+            if (area == null)
             {
-                message = NebulaAPI.Language.Translate("prompt.reconnectFailed");
-
-                if (string.IsNullOrEmpty(message) || message.StartsWith("prompt.") || message.StartsWith("*"))
-                {
-                    message = "重连失败，可能是会议正在进行或者其他网络原因。"
-                              + "您的槽位依然保留，请稍后重试。"
-                              + "重连失败不计入玩家重连上限！";
-                }
+                return false;
             }
 
-            DestroyableSingleton<DisconnectPopup>.Instance.ShowCustom(message);
-            NebulaResumeEntry.Log("重连失败提示: 已在原生弹窗显示。");
+            var current = area.text ?? "";
+            if (current.Contains(hint))
+            {
+                return true;
+            }
+
+            var merged = string.IsNullOrWhiteSpace(current) ? hint : current + "\n\n" + hint;
+            _appending = true;
+            try { area.text = merged; }
+            finally { _appending = false; }
+
+            NebulaResumeEntry.Log(_pendingTag + ": 已在游戏原本的报错下方追加重连说明。");
+            return true;
         }
-        catch (System.Exception e)
+        catch
         {
-            NebulaResumeEntry.Log("重连失败提示: 调用原生弹窗失败: " + e.GetType().Name + " : " + e.Message);
+            return false;
         }
     }
 
-    /// <summary>
-    ///     调用游戏原生的掉线弹窗显示提示。
-    ///     这是游戏自带的 UI, 一定存在、一定会显示。
-    /// </summary>
-    private static void ShowNativeNotice()
+    private static void PopupPostfix()
+    {
+        try { TryAppend(); } catch { }
+    }
+
+    // ── 手动退出 ──
+    private static float _manualExitAt = -1000f;
+    private const float ManualExitWindowSeconds = 15f;
+
+    /// <summary>本插件自己调用退出时置位, 不当成玩家手动退出。</summary>
+    internal static bool PluginExiting;
+
+    private static void ExitGamePrefix()
     {
         try
         {
-            if (!DestroyableSingleton<DisconnectPopup>.InstanceExists)
+            if (PluginExiting)
             {
-                NebulaResumeEntry.Log("掉线提示: 原生弹窗实例不存在, 跳过。");
                 return;
             }
 
-            // 走翻译表; 没装语言文件时回退到内置中文。
-            var message = NebulaAPI.Language.Translate("prompt.disconnected");
+            _manualExitAt = UnityEngine.Time.unscaledTime;
+            _pendingHint = null;   // 退出前若有挂起的说明, 一并作废
+        }
+        catch { }
+    }
 
-            if (string.IsNullOrEmpty(message) || message.StartsWith("prompt.") || message.StartsWith("*"))
+    private static void InstallPopupHooks(Harmony harmony)
+    {
+        try
+        {
+            var exit = AccessTools.Method(typeof(AmongUsClient), nameof(AmongUsClient.ExitGame));
+            if (exit != null)
             {
-                // 回退文案同样只写一句话: 语言文件的值不支持换行转义,
-                // 两条路径的文案必须看起来一致, 否则"装了语言文件 / 没装"会显示成两种样子。
-                message = "与服务器的连接意外中断, 重新进入本服务器即可回到这一局。";
+                harmony.Patch(exit, prefix: new HarmonyMethod(typeof(ReconnectPrompt), nameof(ExitGamePrefix)));
             }
-
-            DestroyableSingleton<DisconnectPopup>.Instance.ShowCustom(message);
-            NebulaResumeEntry.Log("掉线提示: 已在原生弹窗显示重连说明。");
         }
         catch (System.Exception e)
         {
-            NebulaResumeEntry.Log("掉线提示: 调用原生弹窗失败: " + e.GetType().Name + " : " + e.Message);
+            NebulaResumeEntry.Log("掉线提示: 挂载 AmongUsClient.ExitGame 失败: " + e.Message);
+        }
+
+        foreach (var name in new[] { "DoShow", "SetText", "ShowCustom" })
+        {
+            try
+            {
+                var m = AccessTools.Method(typeof(DisconnectPopup), name);
+                if (m != null)
+                {
+                    harmony.Patch(m, postfix: new HarmonyMethod(typeof(ReconnectPrompt), nameof(PopupPostfix)));
+                }
+            }
+            catch (System.Exception e)
+            {
+                NebulaResumeEntry.Log("掉线提示: 挂载 DisconnectPopup." + name + " 失败: " + e.Message);
+            }
         }
     }
 }
